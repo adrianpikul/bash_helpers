@@ -1,0 +1,80 @@
+#!/bin/bash
+
+capitalize_first_letter() {
+    local string="$1"
+    echo "${string^}"
+}
+
+remove_prefix() {
+    local branch_name="$1"
+    local prefix="$2"
+    echo "${branch_name#$prefix}"
+}
+
+check_if_prepare_commit_message() {
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+    local automatic_commits_by_git_regex="(Merge\sbranch\s\'|\#\sRebase\s|This\sreverts\scommit\s)"
+
+
+    if [ "$current_branch" == "master" ]; then
+        echo "Error: Cannot execute pre-commit hook on the master branch."
+        return 1
+    fi
+
+    if [[ $current_branch =~ $automatic_commits_by_git_regex ]]; then
+        echo "Error: Cannot execute pre-commit hook on merge/revert/rebase actions."
+        return 1
+    fi
+}
+
+prepare_commit_message() {
+    local latest_commit_path="$1"
+    local commit_type="chore"
+    local branch_prefixes=("bugfix/" "feature/" "hotfix/" "release/")
+    local branch_regex="^([A-Z0-9]+)-([0-9]+)-.*$"
+
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    # Remove specific prefixes from the branch name
+    local branch_name_without_prefixes="$current_branch"
+    for prefix in "${branch_prefixes[@]}"; do
+        branch_name_without_prefixes=$(remove_prefix "$branch_name_without_prefixes" "$prefix")
+    done
+
+    # Check if the branch name matches the expected format
+    if [[ ! $branch_name_without_prefixes =~ $branch_regex ]]; then
+        echo "Error: The branch name does not have the correct format."
+        exit 1
+    fi
+
+    # Extract project code and Jira number from the branch name
+    local project_code=${BASH_REMATCH[1]}
+    local jira_number=${BASH_REMATCH[2]}
+
+    # Read the original commit message from the file
+    local original_commit_message
+    if [ -e "$latest_commit_path" ]; then
+        original_commit_message=$(<"$latest_commit_path")
+    else
+        echo "Error: File '$latest_commit_path' does not exist."
+        exit 1
+    fi
+
+    # Create a new commit message with project code and Jira number
+    local new_commit_msg="$commit_type($project_code-$jira_number): $(capitalize_first_letter "$original_commit_message")"
+
+    # Update the commit message file with the new commit message
+    echo "$new_commit_msg" > "$latest_commit_path"
+    
+    echo -e "\n=============================================================="
+    echo -e "\n   Commit message updated with project code and jira number."
+    echo -e "\n==============================================================\n"
+}
+
+# Main script starts here
+
+if check_if_prepare_commit_message; then 
+  prepare_commit_message "$1"
+else
+  echo "Cannot preapre commit"
+fi
